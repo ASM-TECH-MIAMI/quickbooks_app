@@ -16,7 +16,7 @@ import secrets
 import urllib.parse
 from datetime import date
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 import anthropic
 from fastapi import FastAPI, HTTPException, Request
@@ -66,7 +66,7 @@ _oauth_states: dict[str, dict] = {}
 class ChatRequest(BaseModel):
     company_name: str
     message: str
-    conversation_id: str | None = None
+    conversation_id: Optional[str] = None
 
 
 class DeadlineStatusRequest(BaseModel):
