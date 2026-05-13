@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QB AI Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    body { background: #0f172a; }
+    .prose-dark { color: #e2e8f0; }
+    .prose-dark h2 { color: #f8fafc; font-size: 1.1em; font-weight: 700; margin: .75em 0 .4em; }
+    .prose-dark h3 { color: #f1f5f9; font-size: 1em; font-weight: 600; margin: .6em 0 .3em; }
+    .prose-dark p  { margin: .4em 0; line-height: 1.65; }
+    .prose-dark ul, .prose-dark ol { padding-left: 1.5em; margin: .4em 0; }
+    .prose-dark li { margin: .2em 0; }
+    .prose-dark table { width: 100%; border-collapse: collapse; margin: .75em 0; font-size: .875em; }
+    .prose-dark th { background: #1e293b; padding: .4em .7em; text-align: left; color: #94a3b8; font-weight: 600; border: 1px solid #334155; }
+    .prose-dark td { padding: .4em .7em; border: 1px solid #334155; }
+    .prose-dark tr:nth-child(even) td { background: #1e293b44; }
+    .prose-dark code { background: #1e293b; padding: .1em .3em; border-radius: .25em; font-size: .85em; color: #7dd3fc; }
+    .prose-dark blockquote { border-left: 3px solid #334155; padding-left: .75em; color: #94a3b8; margin: .5em 0; }
+    #chat { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+    .tool-badge { animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.5 } }
+  </style>
+</head>
+<body class="h-screen flex flex-col">
+
+  <!-- Header -->
+  <header class="bg-slate-900 border-b border-slate-700 px-6 py-3 flex items-center justify-between shrink-0">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">QB</div>
+      <span class="text-white font-semibold">QB AI Agent</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <select id="companySelect" class="bg-slate-800 text-slate-200 border border-slate-600 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+        <option value="">Loading companies...</option>
+      </select>
+      <a id="connectBtn" href="/auth/connect/1" class="hidden text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded-lg transition">
+        + Connect Company
+      </a>
+    </div>
+  </header>
+
+  <!-- Chat area -->
+  <div id="chat" class="flex-1 overflow-y-auto px-4 py-4 space-y-4"></div>
+
+  <!-- Input -->
+  <div class="bg-slate-900 border-t border-slate-700 p-4 shrink-0">
+    <div class="max-w-4xl mx-auto flex gap-3">
+      <textarea
+        id="msgInput"
+        rows="1"
+        placeholder="Ask about revenue, expenses, tax deadlines, AR/AP, customers..."
+        class="flex-1 bg-slate-800 text-slate-100 placeholder-slate-500 border border-slate-600 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500"
+        style="min-height:48px;max-height:160px"
+      ></textarea>
+      <button id="sendBtn"
+        class="bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-5 py-3 rounded-xl text-sm font-medium transition shrink-0">
+        Send
+      </button>
+    </div>
+    <p class="text-center text-slate-600 text-xs mt-2">Powered by Claude · QuickBooks Online</p>
+  </div>
+
+<script>
+const chat = document.getElementById('chat');
+const input = document.getElementById('msgInput');
+const sendBtn = document.getElementById('sendBtn');
+const companySelect = document.getElementById('companySelect');
+let convId = null;
+let busy = false;
+
+// Auto-grow textarea
+input.addEventListener('input', () => {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+});
+
+// Load companies
+async function loadCompanies() {
+  const res = await fetch('/api/companies');
+  const { companies } = await res.json();
+  companySelect.innerHTML = '';
+  if (!companies.length) {
+    companySelect.innerHTML = '<option value="">No companies connected</option>';
+    document.getElementById('connectBtn').classList.remove('hidden');
+    return;
+  }
+  companies.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.name;
+    opt.textContent = c.name;
+    companySelect.appendChild(opt);
+  });
+  // Add "Connect another" option
+  const div = document.createElement('option');
+  div.disabled = true;
+  div.textContent = '─────────────';
+  companySelect.appendChild(div);
+  [1,2,3,4].forEach((i, idx) => {
+    const names = ['Miami Image Society LLC','Lush Media Group LLC','ASM Tech Media Group LLC','Atomick LLC'];
+    const opt = document.createElement('option');
+    opt.value = `__connect_${i}`;
+    opt.textContent = `+ Connect: ${names[idx]}`;
+    companySelect.appendChild(opt);
+  });
+}
+
+companySelect.addEventListener('change', () => {
+  const v = companySelect.value;
+  if (v.startsWith('__connect_')) {
+    window.open(`/auth/connect/${v.slice(10)}`, '_blank');
+    setTimeout(loadCompanies, 3000);
+    return;
+  }
+  convId = null;
+  chat.innerHTML = '';
+  addSystemMsg(`Switched to **${v}**. How can I help?`);
+});
+
+function addSystemMsg(text) {
+  const div = document.createElement('div');
+  div.className = 'text-center text-slate-500 text-xs';
+  div.textContent = text;
+  chat.appendChild(div);
+}
+
+function bubble(role) {
+  const wrap = document.createElement('div');
+  wrap.className = role === 'user'
+    ? 'flex justify-end'
+    : 'flex justify-start';
+
+  const box = document.createElement('div');
+  box.className = role === 'user'
+    ? 'bg-green-700 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm max-w-xl'
+    : 'bg-slate-800 text-slate-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm max-w-2xl prose-dark';
+
+  wrap.appendChild(box);
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+  return box;
+}
+
+function toolBadge(name) {
+  const b = document.createElement('span');
+  b.className = 'inline-flex items-center gap-1 bg-slate-700 text-slate-300 text-xs px-2 py-0.5 rounded-full tool-badge mr-1 mb-1';
+  b.innerHTML = `<span class="text-yellow-400">⚙</span> ${name}`;
+  b.id = `tool-${name}-${Date.now()}`;
+  return b;
+}
+
+async function send() {
+  const company = companySelect.value;
+  if (!company || company.startsWith('__') || busy) return;
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  busy = true;
+  sendBtn.disabled = true;
+  input.value = '';
+  input.style.height = '48px';
+
+  bubble('user').textContent = msg;
+
+  const agentBox = bubble('agent');
+  const toolArea = document.createElement('div');
+  toolArea.className = 'mb-2 flex flex-wrap';
+  agentBox.appendChild(toolArea);
+  const textArea = document.createElement('div');
+  agentBox.appendChild(textArea);
+
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ company_name: company, message: msg, conversation_id: convId }),
+  });
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let fullText = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split('\n\n');
+    buf = parts.pop();
+
+    for (const part of parts) {
+      if (!part.startsWith('event:')) continue;
+      const lines = part.split('\n');
+      const event = lines[0].replace('event: ', '');
+      const data  = JSON.parse(lines[1].replace('data: ', ''));
+
+      if (event === 'conv_id') { convId = data.id; }
+      else if (event === 'tool_start') {
+        const badge = toolBadge(data.name);
+        toolArea.appendChild(badge);
+        chat.scrollTop = chat.scrollHeight;
+      }
+      else if (event === 'tool_done') {
+        const badge = toolArea.querySelector(`[id^="tool-${data.name}"]`);
+        if (badge) {
+          badge.classList.remove('tool-badge');
+          badge.innerHTML = `<span>${data.ok ? '✓' : '✗'}</span> ${data.name}`;
+          badge.className = badge.className.replace('text-slate-300', data.ok ? 'text-green-400' : 'text-red-400');
+        }
+      }
+      else if (event === 'message') {
+        fullText += data.text;
+        textArea.innerHTML = marked.parse(fullText);
+        chat.scrollTop = chat.scrollHeight;
+      }
+    }
+  }
+
+  busy = false;
+  sendBtn.disabled = false;
+  input.focus();
+}
+
+sendBtn.addEventListener('click', send);
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+loadCompanies();
+addSystemMsg('Ask me anything about your QuickBooks data or IRS deadlines.');
+</script>
+</body>
+</html>

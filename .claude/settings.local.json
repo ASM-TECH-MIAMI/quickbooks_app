@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__9cbc8cdd-07c0-4f2f-ac7a-6c394f0299e1__company-info",
+      "mcp__9cbc8cdd-07c0-4f2f-ac7a-6c394f0299e1__profit-loss-quickbooks-account",
+      "Bash(chmod 600 /Users/michelzarate/Documents/Claude/Quickbooks/.env /Users/michelzarate/Documents/Claude/Quickbooks/credentials.json)",
+      "Bash(python3 -m venv .venv)",
+      "Bash(.venv/bin/pip install *)"
+    ]
+  }
+}
