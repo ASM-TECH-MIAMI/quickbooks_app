@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CFO Dashboard — QB AI Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0f172a; color: #e2e8f0; font-family: system-ui, sans-serif; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; }
+    .metric-up   { color: #4ade80; }
+    .metric-down { color: #f87171; }
+    .metric-warn { color: #fbbf24; }
+    .badge-overdue  { background:#7f1d1d; color:#fca5a5; }
+    .badge-upcoming { background:#1e3a5f; color:#93c5fd; }
+    .badge-done     { background:#14532d; color:#86efac; }
+    .spinner { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="min-h-screen">
+
+  <!-- Nav -->
+  <nav class="bg-slate-900 border-b border-slate-700 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <div class="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center font-bold text-sm text-white">QB</div>
+      <span class="font-semibold text-white text-lg">CFO Dashboard</span>
+      <span id="asOf" class="text-slate-500 text-sm"></span>
+    </div>
+    <div class="flex items-center gap-3">
+      <a href="/" class="text-sm text-slate-400 hover:text-white transition px-3 py-1.5 rounded-lg hover:bg-slate-800">💬 Chat</a>
+      <button onclick="loadDashboard()" class="text-sm bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg transition">↻ Refresh</button>
+    </div>
+  </nav>
+
+  <div class="max-w-7xl mx-auto px-6 py-8">
+
+    <!-- Loading -->
+    <div id="loading" class="flex items-center justify-center py-24 gap-3 text-slate-400">
+      <svg class="spinner w-6 h-6" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+      </svg>
+      <span>Loading company data...</span>
+    </div>
+
+    <!-- Dashboard content -->
+    <div id="content" class="hidden space-y-8">
+
+      <!-- Company cards grid -->
+      <div>
+        <h2 class="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-4">Company Overview — <span id="period"></span></h2>
+        <div id="companyGrid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+      </div>
+
+      <!-- Combined totals + Deadlines row -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Totals -->
+        <div class="card p-6 lg:col-span-1">
+          <h3 class="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-4">Combined YTD Totals</h3>
+          <div id="totals" class="space-y-3"></div>
+        </div>
+
+        <!-- IRS Deadlines -->
+        <div class="card p-6 lg:col-span-2">
+          <h3 class="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-4">IRS Deadlines — Next 60 Days</h3>
+          <div id="deadlines" class="space-y-2"></div>
+          <div id="overdueSection" class="mt-5"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+function fmt(n) {
+  if (n === null || n === undefined) return '—';
+  const abs = Math.abs(n);
+  const s = abs >= 1e6 ? (abs/1e6).toFixed(2)+'M' : abs >= 1e3 ? (abs/1e3).toFixed(1)+'K' : abs.toFixed(0);
+  return (n < 0 ? '-$' : '$') + s;
+}
+
+function pctColor(v) {
+  if (v === null || v === undefined) return 'text-slate-400';
+  if (v >= 20) return 'metric-up';
+  if (v >= 5)  return 'metric-warn';
+  return 'metric-down';
+}
+
+function makeCompanyCard(c) {
+  if (c.error) {
+    return `<div class="card p-5 border-red-900">
+      <div class="font-semibold text-white mb-1">${c.name}</div>
+      <div class="text-red-400 text-sm">⚠ ${c.error}</div>
+    </div>`;
+  }
+  const marginClass = pctColor(c.margin_pct);
+  const incomeClass = c.net_income >= 0 ? 'metric-up' : 'metric-down';
+  const cashClass   = c.cash >= 0 ? 'text-slate-200' : 'metric-down';
+
+  return `<div class="card p-5">
+    <div class="flex items-start justify-between mb-4">
+      <div>
+        <div class="font-semibold text-white text-base leading-tight">${c.name}</div>
+        <div class="text-slate-500 text-xs mt-0.5">${c.period}</div>
+      </div>
+      <span class="text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-400 font-medium">LIVE</span>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <div class="text-slate-500 text-xs mb-1">Revenue</div>
+        <div class="text-white font-bold text-lg">${fmt(c.revenue)}</div>
+      </div>
+      <div>
+        <div class="text-slate-500 text-xs mb-1">Net Income</div>
+        <div class="font-bold text-lg ${incomeClass}">${fmt(c.net_income)}</div>
+      </div>
+      <div>
+        <div class="text-slate-500 text-xs mb-1">Net Margin</div>
+        <div class="font-bold text-lg ${marginClass}">${c.margin_pct}%</div>
+      </div>
+      <div>
+        <div class="text-slate-500 text-xs mb-1">Cash</div>
+        <div class="font-bold text-lg ${cashClass}">${fmt(c.cash)}</div>
+      </div>
+    </div>
+    <a href="/?company=${encodeURIComponent(c.name)}"
+       class="mt-4 flex items-center justify-center gap-2 w-full text-sm bg-slate-700 hover:bg-slate-600 text-slate-200 py-2 rounded-lg transition">
+      💬 Ask CFO AI
+    </a>
+  </div>`;
+}
+
+function renderDeadlines(deadlines, overdue) {
+  const dl = document.getElementById('deadlines');
+  const od = document.getElementById('overdueSection');
+
+  if (!deadlines.length) {
+    dl.innerHTML = '<p class="text-slate-500 text-sm">No deadlines in the next 60 days.</p>';
+  } else {
+    dl.innerHTML = deadlines.map(d => {
+      const daysLeft = Math.ceil((new Date(d.due_date) - new Date()) / 86400000);
+      const urgency  = daysLeft <= 7 ? 'text-red-400' : daysLeft <= 21 ? 'text-yellow-400' : 'text-slate-300';
+      return `<div class="flex items-center justify-between py-2 border-b border-slate-700 last:border-0">
+        <div>
+          <span class="text-xs font-mono bg-slate-700 text-slate-300 px-2 py-0.5 rounded mr-2">${d.form}</span>
+          <span class="text-sm text-slate-300">${d.description}</span>
+        </div>
+        <div class="text-right shrink-0 ml-3">
+          <div class="text-xs ${urgency} font-semibold">${d.due_date}</div>
+          <div class="text-xs text-slate-500">${daysLeft}d</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  if (overdue.length) {
+    od.innerHTML = `<div class="bg-red-950 border border-red-800 rounded-lg p-4">
+      <div class="text-red-400 font-semibold text-sm mb-2">⚠ ${overdue.length} Overdue Filings</div>
+      ${overdue.slice(0,3).map(d => `
+        <div class="flex justify-between text-sm py-1">
+          <span class="text-red-300"><span class="font-mono text-xs">${d.form}</span> — ${d.description}</span>
+          <span class="text-red-400 text-xs font-semibold">${d.due_date}</span>
+        </div>`).join('')}
+      ${overdue.length > 3 ? `<div class="text-red-500 text-xs mt-1">+${overdue.length-3} more overdue</div>` : ''}
+    </div>`;
+  }
+}
+
+function renderTotals(companies) {
+  const valid = companies.filter(c => !c.error);
+  const totalRev   = valid.reduce((s, c) => s + (c.revenue || 0), 0);
+  const totalInc   = valid.reduce((s, c) => s + (c.net_income || 0), 0);
+  const totalCash  = valid.reduce((s, c) => s + (c.cash || 0), 0);
+  const avgMargin  = valid.length ? (valid.reduce((s,c) => s + (c.margin_pct||0), 0) / valid.length).toFixed(1) : 0;
+
+  const rows = [
+    ['Total Revenue',    fmt(totalRev),   'text-white'],
+    ['Total Net Income', fmt(totalInc),   totalInc >= 0 ? 'metric-up' : 'metric-down'],
+    ['Total Cash',       fmt(totalCash),  'text-white'],
+    ['Avg Net Margin',   avgMargin+'%',   pctColor(parseFloat(avgMargin))],
+    ['Companies',        valid.length + ' connected', 'text-slate-300'],
+  ];
+
+  document.getElementById('totals').innerHTML = rows.map(([label, val, cls]) => `
+    <div class="flex justify-between items-center">
+      <span class="text-slate-500 text-sm">${label}</span>
+      <span class="font-semibold ${cls}">${val}</span>
+    </div>`).join('');
+}
+
+async function loadDashboard() {
+  document.getElementById('loading').classList.remove('hidden');
+  document.getElementById('content').classList.add('hidden');
+
+  try {
+    const res  = await fetch('/api/dashboard');
+    const data = await res.json();
+
+    document.getElementById('asOf').textContent = `as of ${data.as_of}`;
+    document.getElementById('period').textContent = data.companies[0]?.period || '';
+
+    // Company cards
+    document.getElementById('companyGrid').innerHTML =
+      data.companies.map(makeCompanyCard).join('') ||
+      '<p class="text-slate-500 col-span-3">No companies connected.</p>';
+
+    renderTotals(data.companies);
+    renderDeadlines(data.deadlines, data.overdue);
+
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+  } catch(e) {
+    document.getElementById('loading').innerHTML =
+      `<div class="text-red-400">Error loading dashboard: ${e.message}</div>`;
+  }
+}
+
+// Auto-select company from URL param when navigating to chat
+window.addEventListener('load', () => {
+  loadDashboard();
+});
+</script>
+</body>
+</html>

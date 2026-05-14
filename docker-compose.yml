@@ -1,11 +1,29 @@
 services:
   app:
     build: .
+    container_name: quickbooks-app-1
     ports:
       - "8000:8000"
     env_file:
       - .env
     restart: unless-stopped
     volumes:
-      - ./app:/app/app        # hot-reload during development
+      - ./app:/app/app
       - ./static:/app/static
+    networks:
+      - default
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: quickbooks-cloudflared-1
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      - app
+    networks:
+      - default
+
+networks:
+  default: {}

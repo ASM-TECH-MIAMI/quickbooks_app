@@ -14,7 +14,8 @@ import json
 import os
 import secrets
 import urllib.parse
-from datetime import date
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, timedelta
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
@@ -80,6 +81,11 @@ class DeadlineStatusRequest(BaseModel):
 async def root():
     index = static_dir / "index.html"
     return HTMLResponse(index.read_text())
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page():
+    return HTMLResponse((static_dir / "dashboard.html").read_text())
 
 
 # ── Companies ──────────────────────────────────────────────────────────────────
@@ -202,6 +208,109 @@ async def api_deadline_status(deadline_id: str, req: DeadlineStatusRequest):
         raise HTTPException(404, "Company not found.")
     set_deadline_status(company["id"], deadline_id, req.status, req.notes)
     return {"ok": True}
+
+
+# ── CFO Dashboard — multi-company snapshot ────────────────────────────────────
+def _fetch_company_snapshot(row: dict) -> dict:
+    """Fetch P&L + cash for one company. Runs in a thread."""
+    name = row["name"]
+    try:
+        qbo = QBOClient.from_db(row)
+        today = date.today()
+        yr_start = f"{today.year}-01-01"
+        yr_end   = today.isoformat()
+
+        pl  = qbo.profit_and_loss(yr_start, yr_end)
+        cf  = qbo.cash_flow(yr_start, yr_end)
+
+        def _val(rows, label):
+            for r in rows:
+                if r.get("type") == "Section":
+                    for sub in r.get("Rows", {}).get("Row", []):
+                        if sub.get("type") == "Total" and label.lower() in sub.get("Header", {}).get("ColData", [{}])[0].get("value", "").lower():
+                            cols = sub.get("ColData", [])
+                            return float(cols[1]["value"]) if len(cols) > 1 else 0
+            return 0
+
+        rows = pl.get("Rows", {}).get("Row", [])
+
+        # Recursively collect all Summary rows into a flat dict: label → value
+        def collect_summaries(rows_list: list) -> dict:
+            result = {}
+            for r in rows_list:
+                if isinstance(r, dict):
+                    summ = r.get("Summary", {}).get("ColData", [])
+                    if len(summ) > 1:
+                        label = summ[0].get("value", "").strip().lower()
+                        try:
+                            result[label] = float(summ[1].get("value", 0) or 0)
+                        except (ValueError, TypeError):
+                            pass
+                    # Recurse into sub-rows
+                    sub = r.get("Rows", {}).get("Row", [])
+                    if sub:
+                        result.update(collect_summaries(sub))
+            return result
+
+        summaries = collect_summaries(rows)
+
+        revenue     = next((v for k, v in summaries.items() if "total income" in k or ("total" in k and "revenue" in k)), 0)
+        gross_profit = summaries.get("gross profit", 0)
+        net_income  = next((v for k, v in summaries.items() if "net income" in k or "net profit" in k), 0)
+
+        # Cash from cash flow end balance
+        cash = 0
+        cf_rows = cf.get("Rows", {}).get("Row", [])
+        for cr in cf_rows:
+            if cr.get("type") == "Section":
+                summ = cr.get("Summary", {}).get("ColData", [])
+                lbl  = summ[0].get("value", "").lower() if summ else ""
+                if "ending" in lbl or "end" in lbl:
+                    cash = float(summ[1]["value"]) if len(summ) > 1 else 0
+
+        margin = round((net_income / revenue * 100), 1) if revenue else 0
+
+        return {
+            "name":        name,
+            "revenue":     revenue,
+            "gross_profit": gross_profit,
+            "net_income":  net_income,
+            "margin_pct":  margin,
+            "cash":        cash,
+            "period":      f"YTD {today.year}",
+            "error":       None,
+        }
+    except Exception as e:
+        return {"name": name, "error": str(e)}
+
+
+@app.get("/api/dashboard")
+async def api_dashboard():
+    companies = list_companies()
+    if not companies:
+        return {"companies": [], "deadlines": [], "overdue": []}
+
+    snapshots = []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {}
+        for c in companies:
+            row = get_company(c["name"])
+            if row:
+                futures[pool.submit(_fetch_company_snapshot, row)] = c["name"]
+        for future in as_completed(futures):
+            snapshots.append(future.result())
+
+    snapshots.sort(key=lambda x: -(x.get("revenue") or 0))
+
+    upcoming = get_upcoming_deadlines(within_days=60)
+    overdue  = get_overdue_deadlines()
+
+    return {
+        "companies": snapshots,
+        "deadlines": upcoming[:8],
+        "overdue":   overdue[:5],
+        "as_of":     date.today().isoformat(),
+    }
 
 
 # ── OAuth — start ──────────────────────────────────────────────────────────────
