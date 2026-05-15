@@ -16,9 +16,11 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: quickbooks-cloudflared-1
-    command: tunnel --no-autoupdate run
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    volumes:
+      - ./cloudflared-config.yml:/etc/cloudflared/config.yml:ro
     restart: unless-stopped
     depends_on:
       - app

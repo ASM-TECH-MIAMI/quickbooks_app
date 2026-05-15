@@ -1,0 +1,8 @@
+# Local ingress override — routes traffic to the app Docker service.
+# "app" is the service name in docker-compose.yml, reachable inside the
+# Docker network. This overrides the Cloudflare dashboard ingress URL
+# (which points to localhost:8000, unreachable from inside a container).
+ingress:
+  - hostname: qb.asmtech.cloud
+    service: http://app:8000
+  - service: http_status:404
