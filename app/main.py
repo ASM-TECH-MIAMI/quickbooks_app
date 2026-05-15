@@ -10,6 +10,7 @@ Routes:
   GET  /auth/callback           → QBO OAuth callback
 """
 
+import calendar
 import json
 import os
 import secrets
@@ -86,6 +87,11 @@ async def root():
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page():
     return HTMLResponse((static_dir / "dashboard.html").read_text())
+
+
+@app.get("/executive", response_class=HTMLResponse)
+async def executive_page():
+    return HTMLResponse((static_dir / "executive.html").read_text())
 
 
 # ── Companies ──────────────────────────────────────────────────────────────────
@@ -210,6 +216,204 @@ async def api_deadline_status(deadline_id: str, req: DeadlineStatusRequest):
     return {"ok": True}
 
 
+# ── Month status helpers ───────────────────────────────────────────────────────
+def _get_book_close_date(qbo) -> Optional[date]:
+    """Return the BookCloseDate from QBO CompanyInfo, or None."""
+    try:
+        info = qbo.company_info()
+        close_str = info.get("CompanyInfo", {}).get("BookCloseDate", "")
+        if close_str:
+            return date.fromisoformat(close_str[:10])
+    except Exception:
+        pass
+    return None
+
+
+def _count_uncategorized(qbo, start_str: str, end_str: str) -> int:
+    """
+    Count transactions posted to uncategorized / ask-my-accountant accounts
+    in the given date range.  Returns -1 on error.
+    """
+    target_names = {
+        "uncategorized expense",
+        "uncategorized income",
+        "uncategorized asset",
+        "ask my accountant",
+    }
+    total = 0
+    try:
+        # Purchases (credit-card charges, checks, etc.)
+        r = qbo.query(
+            f"SELECT * FROM Purchase "
+            f"WHERE TxnDate >= '{start_str}' AND TxnDate <= '{end_str}' "
+            f"MAXRESULTS 1000"
+        )
+        for txn in r.get("Purchase", []):
+            for line in txn.get("Line", []):
+                acct = (
+                    line.get("AccountBasedExpenseLineDetail", {})
+                    .get("AccountRef", {})
+                    .get("name", "")
+                    .lower()
+                    .strip()
+                )
+                if acct in target_names:
+                    total += 1
+                    break          # count the *transaction* once
+    except Exception:
+        return -1
+
+    try:
+        # Journal entries
+        r = qbo.query(
+            f"SELECT * FROM JournalEntry "
+            f"WHERE TxnDate >= '{start_str}' AND TxnDate <= '{end_str}' "
+            f"MAXRESULTS 1000"
+        )
+        for txn in r.get("JournalEntry", []):
+            hit = False
+            for line in txn.get("Line", []):
+                acct = (
+                    line.get("JournalEntryLineDetail", {})
+                    .get("AccountRef", {})
+                    .get("name", "")
+                    .lower()
+                    .strip()
+                )
+                if acct in target_names:
+                    hit = True
+                    break
+            if hit:
+                total += 1
+    except Exception:
+        pass
+
+    return total
+
+
+def _fetch_month_status(qbo, today: date) -> list:
+    """
+    Return a list of dicts for each month Jan→current, e.g.
+      [{"month": 1, "name": "Jan", "status": "closed", "uncategorized": 0}, ...]
+    status values: "closed" | "open" | "current"
+    """
+    close_date = _get_book_close_date(qbo)
+
+    months = []
+    for m in range(1, today.month + 1):
+        _, last_day = calendar.monthrange(today.year, m)
+        m_start = date(today.year, m, 1)
+        m_end   = date(today.year, m, last_day)
+        name    = m_start.strftime("%b")
+
+        if close_date and m_end <= close_date:
+            status = "closed"
+            uncategorized = 0
+        elif m == today.month:
+            status = "current"
+            uncategorized = _count_uncategorized(
+                qbo, m_start.isoformat(), today.isoformat()
+            )
+        else:
+            status = "open"
+            uncategorized = _count_uncategorized(
+                qbo, m_start.isoformat(), m_end.isoformat()
+            )
+
+        months.append({
+            "month":        m,
+            "name":         name,
+            "status":       status,
+            "uncategorized": uncategorized,
+        })
+
+    return months
+
+
+# ── Shared P&L parsers ────────────────────────────────────────────────────────
+def collect_summaries(rows_list: list) -> dict:
+    """Recursively collect all Summary rows from a QBO P&L into {label: value}."""
+    result = {}
+    for r in rows_list:
+        if isinstance(r, dict):
+            summ = r.get("Summary", {}).get("ColData", [])
+            if len(summ) > 1:
+                label = summ[0].get("value", "").strip().lower()
+                try:
+                    result[label] = float(summ[1].get("value", 0) or 0)
+                except (ValueError, TypeError):
+                    pass
+            sub = r.get("Rows", {}).get("Row", [])
+            if sub:
+                result.update(collect_summaries(sub))
+    return result
+
+
+def parse_monthly_pl(report: dict) -> list:
+    """
+    Parse a ProfitAndLoss report fetched with summarize_column_by=Month.
+    Returns [{"month": "Jan", "revenue": x, "gross_profit": x, "net_income": x}, ...]
+    """
+    columns = report.get("Columns", {}).get("Column", [])
+
+    # Build col_index → "Jan" mapping (skip index 0 = label, skip "Total")
+    month_map: dict[int, str] = {}
+    for i, col in enumerate(columns):
+        title = col.get("ColTitle", "").strip()
+        if i > 0 and title and title.lower() != "total":
+            month_map[i] = title.split(" ")[0]   # "Jan 2025" → "Jan"
+
+    monthly: dict[str, dict] = {
+        name: {"month": name, "revenue": 0.0, "gross_profit": 0.0, "net_income": 0.0}
+        for name in month_map.values()
+    }
+
+    TARGET = {
+        "total income":  "revenue",
+        "total revenue": "revenue",
+        "gross profit":  "gross_profit",
+        "net income":    "net_income",
+        "net profit":    "net_income",
+    }
+
+    def _walk(rows_list: list):
+        for r in rows_list:
+            if not isinstance(r, dict):
+                continue
+            summ_data = r.get("Summary", {}).get("ColData", [])
+            if summ_data:
+                label = summ_data[0].get("value", "").strip().lower()
+                for key, field in TARGET.items():
+                    if key in label:
+                        for idx, mname in month_map.items():
+                            if idx < len(summ_data):
+                                try:
+                                    monthly[mname][field] = float(
+                                        summ_data[idx].get("value", 0) or 0
+                                    )
+                                except (ValueError, TypeError):
+                                    pass
+                        break
+            _walk(r.get("Rows", {}).get("Row", []))
+
+    _walk(report.get("Rows", {}).get("Row", []))
+    return list(monthly.values())
+
+
+def _extract_cash(cf_report: dict) -> float:
+    """Pull ending cash balance from a QBO CashFlow report."""
+    for cr in cf_report.get("Rows", {}).get("Row", []):
+        if cr.get("type") == "Section":
+            summ = cr.get("Summary", {}).get("ColData", [])
+            lbl  = summ[0].get("value", "").lower() if summ else ""
+            if "ending" in lbl or "end" in lbl:
+                try:
+                    return float(summ[1]["value"])
+                except Exception:
+                    pass
+    return 0.0
+
+
 # ── CFO Dashboard — multi-company snapshot ────────────────────────────────────
 def _fetch_company_snapshot(row: dict) -> dict:
     """Fetch P&L + cash for one company. Runs in a thread."""
@@ -223,62 +427,33 @@ def _fetch_company_snapshot(row: dict) -> dict:
         pl  = qbo.profit_and_loss(yr_start, yr_end)
         cf  = qbo.cash_flow(yr_start, yr_end)
 
-        def _val(rows, label):
-            for r in rows:
-                if r.get("type") == "Section":
-                    for sub in r.get("Rows", {}).get("Row", []):
-                        if sub.get("type") == "Total" and label.lower() in sub.get("Header", {}).get("ColData", [{}])[0].get("value", "").lower():
-                            cols = sub.get("ColData", [])
-                            return float(cols[1]["value"]) if len(cols) > 1 else 0
-            return 0
-
         rows = pl.get("Rows", {}).get("Row", [])
-
-        # Recursively collect all Summary rows into a flat dict: label → value
-        def collect_summaries(rows_list: list) -> dict:
-            result = {}
-            for r in rows_list:
-                if isinstance(r, dict):
-                    summ = r.get("Summary", {}).get("ColData", [])
-                    if len(summ) > 1:
-                        label = summ[0].get("value", "").strip().lower()
-                        try:
-                            result[label] = float(summ[1].get("value", 0) or 0)
-                        except (ValueError, TypeError):
-                            pass
-                    # Recurse into sub-rows
-                    sub = r.get("Rows", {}).get("Row", [])
-                    if sub:
-                        result.update(collect_summaries(sub))
-            return result
-
         summaries = collect_summaries(rows)
 
         revenue     = next((v for k, v in summaries.items() if "total income" in k or ("total" in k and "revenue" in k)), 0)
         gross_profit = summaries.get("gross profit", 0)
         net_income  = next((v for k, v in summaries.items() if "net income" in k or "net profit" in k), 0)
 
-        # Cash from cash flow end balance
-        cash = 0
-        cf_rows = cf.get("Rows", {}).get("Row", [])
-        for cr in cf_rows:
-            if cr.get("type") == "Section":
-                summ = cr.get("Summary", {}).get("ColData", [])
-                lbl  = summ[0].get("value", "").lower() if summ else ""
-                if "ending" in lbl or "end" in lbl:
-                    cash = float(summ[1]["value"]) if len(summ) > 1 else 0
+        cash = _extract_cash(cf)
 
         margin = round((net_income / revenue * 100), 1) if revenue else 0
 
+        # Month status (closed vs open, uncategorized count)
+        try:
+            month_status = _fetch_month_status(qbo, today)
+        except Exception:
+            month_status = []
+
         return {
-            "name":        name,
-            "revenue":     revenue,
+            "name":         name,
+            "revenue":      revenue,
             "gross_profit": gross_profit,
-            "net_income":  net_income,
-            "margin_pct":  margin,
-            "cash":        cash,
-            "period":      f"YTD {today.year}",
-            "error":       None,
+            "net_income":   net_income,
+            "margin_pct":   margin,
+            "cash":         cash,
+            "period":       f"YTD {today.year}",
+            "month_status": month_status,
+            "error":        None,
         }
     except Exception as e:
         return {"name": name, "error": str(e)}
@@ -310,6 +485,207 @@ async def api_dashboard():
         "deadlines": upcoming[:8],
         "overdue":   overdue[:5],
         "as_of":     date.today().isoformat(),
+    }
+
+
+# ── Executive Report — per-company deep fetch ─────────────────────────────────
+def _fetch_executive_company(row: dict, today: date, months_elapsed: float) -> dict:
+    """Full executive snapshot: YTD + monthly breakdown + forecast + accounting health."""
+    name = row["name"]
+    try:
+        qbo = QBOClient.from_db(row)
+        yr       = today.year
+        yr_start = f"{yr}-01-01"
+        yr_end   = today.isoformat()
+
+        # ── YTD financials ────────────────────────────────────────────────────
+        pl_ytd = qbo.profit_and_loss(yr_start, yr_end)
+        cf_ytd = qbo.cash_flow(yr_start, yr_end)
+
+        summaries    = collect_summaries(pl_ytd.get("Rows", {}).get("Row", []))
+        revenue      = next((v for k, v in summaries.items()
+                             if "total income" in k or ("total" in k and "revenue" in k)), 0.0)
+        gross_profit = summaries.get("gross profit", 0.0)
+        net_income   = next((v for k, v in summaries.items()
+                             if "net income" in k or "net profit" in k), 0.0)
+        margin       = round(net_income / revenue * 100, 1) if revenue else 0.0
+        cash         = _extract_cash(cf_ytd)
+
+        # ── Monthly P&L (one API call, all months) ────────────────────────────
+        pl_monthly_raw = qbo.get(
+            "reports/ProfitAndLoss",
+            {"start_date": yr_start, "end_date": yr_end,
+             "summarize_column_by": "Month", "minorversion": 65},
+        )
+        monthly = parse_monthly_pl(pl_monthly_raw)
+
+        # ── Forecast (linear run-rate) ─────────────────────────────────────────
+        months_remaining = 12.0 - months_elapsed
+        avg_rev = revenue / months_elapsed if months_elapsed else 0
+        avg_inc = net_income / months_elapsed if months_elapsed else 0
+        forecast_rev = round(revenue + avg_rev * months_remaining)
+        forecast_inc = round(net_income + avg_inc * months_remaining)
+
+        # ── Accounting health ─────────────────────────────────────────────────
+        month_status = _fetch_month_status(qbo, today)
+
+        past_months      = [m for m in month_status if m["status"] != "current"]
+        months_closed    = sum(1 for m in past_months if m["status"] == "closed")
+        months_open      = sum(1 for m in past_months if m["status"] == "open")
+        total_uncat      = sum(m["uncategorized"] for m in month_status
+                               if m.get("uncategorized", 0) > 0)
+
+        # Days behind: oldest unclosed past month → expected close date was +15 days
+        days_behind = 0
+        for m in month_status:
+            if m["status"] == "open":
+                _, last_day = calendar.monthrange(yr, m["month"])
+                expected_close = date(yr, m["month"], last_day) + timedelta(days=15)
+                lag = (today - expected_close).days
+                if lag > days_behind:
+                    days_behind = max(0, lag)
+
+        # Health score 0-100
+        n_past = len(past_months)
+        close_pts  = round(months_closed / n_past * 60) if n_past else 60
+        uncat_pts  = max(0, 40 - total_uncat * 3)
+        health     = close_pts + uncat_pts
+
+        if months_open == 0 and total_uncat == 0:
+            acct_status = "on_track"
+        elif months_open <= 1 and total_uncat < 5:
+            acct_status = "slightly_behind"
+        elif months_open <= 2 or total_uncat < 15:
+            acct_status = "behind"
+        else:
+            acct_status = "critical"
+
+        return {
+            "name": name,
+            "ytd": {
+                "revenue":      revenue,
+                "gross_profit": gross_profit,
+                "net_income":   net_income,
+                "margin_pct":   margin,
+                "cash":         cash,
+            },
+            "monthly": monthly,
+            "forecast": {
+                "revenue_eoy":    forecast_rev,
+                "net_income_eoy": forecast_inc,
+                "margin_eoy":     round(forecast_inc / forecast_rev * 100, 1) if forecast_rev else 0,
+            },
+            "accounting": {
+                "months_closed":   months_closed,
+                "months_open":     months_open,
+                "total_uncat":     total_uncat,
+                "days_behind":     days_behind,
+                "health_score":    health,
+                "status":          acct_status,
+            },
+            "month_status": month_status,
+            "error":        None,
+        }
+    except Exception as e:
+        return {"name": name, "error": str(e)}
+
+
+@app.get("/api/executive")
+async def api_executive():
+    """Full CFO → CEO executive report with monthly breakdown and forecasts."""
+    companies = list_companies()
+    if not companies:
+        return {"companies": [], "portfolio": {}, "monthly_portfolio": []}
+
+    today   = date.today()
+    yr      = today.year
+    _, d_in_mo = calendar.monthrange(yr, today.month)
+    months_elapsed   = (today.month - 1) + today.day / d_in_mo
+    months_remaining = 12.0 - months_elapsed
+
+    results: list[dict] = []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {
+            pool.submit(_fetch_executive_company, get_company(c["name"]), today, months_elapsed): c["name"]
+            for c in companies if get_company(c["name"])
+        }
+        for fut in as_completed(futures):
+            results.append(fut.result())
+
+    results.sort(key=lambda x: -(x.get("ytd", {}).get("revenue") or 0))
+
+    valid = [r for r in results if not r.get("error")]
+
+    # ── Portfolio totals ──────────────────────────────────────────────────────
+    total_rev  = sum(r["ytd"]["revenue"]    for r in valid)
+    total_inc  = sum(r["ytd"]["net_income"] for r in valid)
+    total_cash = sum(r["ytd"]["cash"]       for r in valid)
+    avg_margin = round(sum(r["ytd"]["margin_pct"] for r in valid) / len(valid), 1) if valid else 0
+
+    avg_rev = total_rev / months_elapsed if months_elapsed else 0
+    avg_inc = total_inc / months_elapsed if months_elapsed else 0
+    forecast_rev = round(total_rev + avg_rev * months_remaining)
+    forecast_inc = round(total_inc + avg_inc * months_remaining)
+
+    # ── Monthly portfolio rollup ───────────────────────────────────────────────
+    ALL_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    mp: dict[str, dict] = {}
+    for r in valid:
+        for m in r.get("monthly", []):
+            mn = m["month"]
+            if mn not in mp:
+                mp[mn] = {"month": mn, "revenue": 0.0, "net_income": 0.0, "gross_profit": 0.0}
+            mp[mn]["revenue"]      += m.get("revenue", 0)
+            mp[mn]["net_income"]   += m.get("net_income", 0)
+            mp[mn]["gross_profit"] += m.get("gross_profit", 0)
+
+    monthly_actual = [mp[m] for m in ALL_MONTHS[:today.month] if m in mp]
+
+    # Projected months (Jun → Dec) using avg monthly from actual data
+    projected_monthly: list[dict] = []
+    for i, mn in enumerate(ALL_MONTHS[today.month:], start=1):
+        projected_monthly.append({
+            "month":      mn,
+            "revenue":    round(avg_rev),
+            "net_income": round(avg_inc),
+            "projected":  True,
+        })
+
+    # Accounting health summary
+    total_months_open  = sum(r["accounting"]["months_open"]  for r in valid)
+    total_uncat        = sum(r["accounting"]["total_uncat"]  for r in valid)
+    max_days_behind    = max((r["accounting"]["days_behind"] for r in valid), default=0)
+    avg_health         = round(sum(r["accounting"]["health_score"] for r in valid) / len(valid)) if valid else 0
+
+    # IRS deadlines
+    upcoming = get_upcoming_deadlines(within_days=90)
+    overdue  = get_overdue_deadlines()
+
+    return {
+        "as_of":   today.isoformat(),
+        "year":    yr,
+        "months_elapsed": round(months_elapsed, 2),
+        "portfolio": {
+            "total_revenue_ytd":    total_rev,
+            "total_net_income_ytd": total_inc,
+            "total_cash":           total_cash,
+            "avg_margin":           avg_margin,
+            "companies_count":      len(valid),
+            "forecast_revenue_eoy":    forecast_rev,
+            "forecast_net_income_eoy": forecast_inc,
+            "forecast_margin_eoy": round(forecast_inc / forecast_rev * 100, 1) if forecast_rev else 0,
+        },
+        "accounting_summary": {
+            "total_months_open": total_months_open,
+            "total_uncat":       total_uncat,
+            "max_days_behind":   max_days_behind,
+            "avg_health_score":  avg_health,
+        },
+        "companies":          results,
+        "monthly_actual":     monthly_actual,
+        "monthly_projected":  projected_monthly,
+        "deadlines":          upcoming[:10],
+        "overdue":            overdue[:5],
     }
 
 

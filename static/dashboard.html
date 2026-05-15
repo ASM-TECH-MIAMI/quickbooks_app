@@ -3,224 +3,307 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CFO Dashboard — QB AI Agent</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>CFO Dashboard</title>
+  <script src="/static/sidebar.js"></script>
   <style>
-    body { background: #0f172a; color: #e2e8f0; font-family: system-ui, sans-serif; }
-    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; }
-    .metric-up   { color: #4ade80; }
-    .metric-down { color: #f87171; }
-    .metric-warn { color: #fbbf24; }
-    .badge-overdue  { background:#7f1d1d; color:#fca5a5; }
-    .badge-upcoming { background:#1e3a5f; color:#93c5fd; }
-    .badge-done     { background:#14532d; color:#86efac; }
-    .spinner { animation: spin 1s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .page { padding: 32px 28px; max-width: 1400px; margin: 0 auto; }
+
+    /* ── Page header ─────────────────────────────────────────────────────── */
+    .page-hd {
+      display:flex; align-items:center; justify-content:space-between;
+      margin-bottom: 28px;
+    }
+    .page-title { font-size:24px; font-weight:700; color:var(--t1); }
+    .page-sub   { font-size:13px; color:var(--t3); margin-top:3px; }
+    .refresh-btn {
+      display:flex; align-items:center; gap:7px;
+      background:var(--s2); border:1px solid var(--sep);
+      border-radius:10px; color:var(--t2); font-family:var(--font);
+      font-size:13px; font-weight:500; padding:8px 16px;
+      cursor:pointer; transition:background .13s, color .13s;
+    }
+    .refresh-btn:hover { background:var(--s3); color:var(--t1); }
+
+    /* ── Loading ─────────────────────────────────────────────────────────── */
+    .loading {
+      display:flex; flex-direction:column; align-items:center;
+      justify-content:center; gap:14px; padding:80px 0; color:var(--t3);
+    }
+    .spinner { animation:spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* ── Company grid ────────────────────────────────────────────────────── */
+    .co-grid {
+      display:grid; gap:16px;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
+
+    /* ── Company card ────────────────────────────────────────────────────── */
+    .co-card {
+      background:var(--s2); border:1px solid var(--sep);
+      border-radius:18px; padding:22px;
+      transition:border-color .2s, transform .2s;
+    }
+    .co-card:hover { border-color:var(--s4); transform:translateY(-1px); }
+
+    .co-card-hd {
+      display:flex; align-items:flex-start;
+      justify-content:space-between; margin-bottom:18px;
+    }
+    .co-name  { font-size:15px; font-weight:600; color:var(--t1); line-height:1.3; }
+    .co-period{ font-size:11px; color:var(--t3); margin-top:3px; }
+    .live-badge {
+      display:flex; align-items:center; gap:5px;
+      font-size:11px; font-weight:600;
+      color:var(--green); background:var(--green-d);
+      padding:3px 9px; border-radius:999px;
+    }
+    .live-dot { width:5px; height:5px; border-radius:50%; background:var(--green); }
+
+    .co-metrics { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .metric-box {}
+    .metric-lbl { font-size:11px; color:var(--t3); margin-bottom:4px; font-weight:500; }
+    .metric-val { font-size:20px; font-weight:700; color:var(--t1); }
+
+    /* Month status strip */
+    .month-strip { margin-top:18px; padding-top:16px; border-top:1px solid var(--sep); }
+    .strip-hd {
+      display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:10px;
+    }
+    .strip-lbl { font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--t3); }
+    .strip-sum { font-size:11px; }
+    .month-pills { display:flex; flex-wrap:wrap; gap:5px; }
+    .mpill {
+      font-size:10px; font-weight:600; padding:3px 8px;
+      border-radius:6px; white-space:nowrap;
+    }
+    .mpill-closed  { background:var(--green-d); color:var(--green); }
+    .mpill-open    { background:var(--orange-d); color:var(--orange); }
+    .mpill-current { background:var(--blue-d); color:var(--blue);
+                     box-shadow:0 0 0 1px var(--blue-b); }
+
+    .co-chat-link {
+      display:flex; align-items:center; justify-content:center; gap:7px;
+      margin-top:16px; padding:9px; border-radius:10px;
+      background:var(--s3); border:none; color:var(--t2);
+      font-family:var(--font); font-size:13px; font-weight:500;
+      cursor:pointer; text-decoration:none;
+      transition:background .13s, color .13s;
+    }
+    .co-chat-link:hover { background:var(--s4); color:var(--t1); }
+
+    /* ── Bottom row ──────────────────────────────────────────────────────── */
+    .bottom-row { display:grid; gap:16px; grid-template-columns:280px 1fr; margin-top:20px; }
+    @media(max-width:900px){ .bottom-row { grid-template-columns:1fr; } }
+
+    /* Totals card */
+    .totals-card { background:var(--s2); border:1px solid var(--sep); border-radius:18px; padding:22px; }
+    .total-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--sep); }
+    .total-row:last-child { border-bottom:none; }
+    .total-lbl { font-size:13px; color:var(--t2); }
+    .total-val { font-size:14px; font-weight:600; }
+
+    /* Deadlines card */
+    .dl-card { background:var(--s2); border:1px solid var(--sep); border-radius:18px; padding:22px; }
+    .dl-row {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:10px 0; border-bottom:1px solid var(--sep);
+    }
+    .dl-row:last-child { border-bottom:none; }
+    .dl-form { font-size:11px; font-family:'SF Mono','Fira Mono',monospace; background:var(--s3); color:var(--t2); padding:2px 7px; border-radius:5px; }
+    .dl-desc { font-size:13px; color:var(--t1); }
+    .dl-date { font-size:12px; font-weight:600; }
+
+    .overdue-block { margin-top:14px; background:var(--red-d); border:1px solid rgba(255,69,58,0.25); border-radius:12px; padding:14px 16px; }
+    .overdue-title { font-size:12px; font-weight:700; color:var(--red); margin-bottom:8px; }
+    .overdue-row   { display:flex; justify-content:space-between; padding:4px 0; font-size:13px; }
   </style>
 </head>
-<body class="min-h-screen">
+<body>
 
-  <!-- Nav -->
-  <nav class="bg-slate-900 border-b border-slate-700 px-6 py-3 flex items-center justify-between">
-    <div class="flex items-center gap-4">
-      <div class="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center font-bold text-sm text-white">QB</div>
-      <span class="font-semibold text-white text-lg">CFO Dashboard</span>
-      <span id="asOf" class="text-slate-500 text-sm"></span>
+<div class="page">
+  <!-- Header -->
+  <div class="page-hd">
+    <div>
+      <div class="page-title">CFO Dashboard</div>
+      <div class="page-sub" id="as-of">Loading live data…</div>
     </div>
-    <div class="flex items-center gap-3">
-      <a href="/" class="text-sm text-slate-400 hover:text-white transition px-3 py-1.5 rounded-lg hover:bg-slate-800">💬 Chat</a>
-      <button onclick="loadDashboard()" class="text-sm bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg transition">↻ Refresh</button>
-    </div>
-  </nav>
+    <button class="refresh-btn" onclick="load()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      Refresh
+    </button>
+  </div>
 
-  <div class="max-w-7xl mx-auto px-6 py-8">
+  <!-- Loading -->
+  <div class="loading" id="loading">
+    <svg class="spinner" width="28" height="28" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="10" stroke="var(--s4)" stroke-width="3"/>
+      <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--blue)" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+    <span style="font-size:14px">Loading company data…</span>
+  </div>
 
-    <!-- Loading -->
-    <div id="loading" class="flex items-center justify-center py-24 gap-3 text-slate-400">
-      <svg class="spinner w-6 h-6" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-      </svg>
-      <span>Loading company data...</span>
-    </div>
-
-    <!-- Dashboard content -->
-    <div id="content" class="hidden space-y-8">
-
-      <!-- Company cards grid -->
-      <div>
-        <h2 class="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-4">Company Overview — <span id="period"></span></h2>
-        <div id="companyGrid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+  <!-- Content -->
+  <div id="content" style="display:none;">
+    <div class="co-grid" id="co-grid"></div>
+    <div class="bottom-row">
+      <div class="totals-card">
+        <div class="sec-label">Portfolio Totals</div>
+        <div id="totals"></div>
       </div>
-
-      <!-- Combined totals + Deadlines row -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-        <!-- Totals -->
-        <div class="card p-6 lg:col-span-1">
-          <h3 class="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-4">Combined YTD Totals</h3>
-          <div id="totals" class="space-y-3"></div>
-        </div>
-
-        <!-- IRS Deadlines -->
-        <div class="card p-6 lg:col-span-2">
-          <h3 class="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-4">IRS Deadlines — Next 60 Days</h3>
-          <div id="deadlines" class="space-y-2"></div>
-          <div id="overdueSection" class="mt-5"></div>
-        </div>
+      <div class="dl-card">
+        <div class="sec-label">IRS Deadlines — Next 60 Days</div>
+        <div id="deadlines"></div>
+        <div id="overdue"></div>
       </div>
-
     </div>
   </div>
+</div>
 
 <script>
 function fmt(n) {
-  if (n === null || n === undefined) return '—';
+  if (n == null) return '—';
   const abs = Math.abs(n);
-  const s = abs >= 1e6 ? (abs/1e6).toFixed(2)+'M' : abs >= 1e3 ? (abs/1e3).toFixed(1)+'K' : abs.toFixed(0);
-  return (n < 0 ? '-$' : '$') + s;
+  const s = abs>=1e6?(abs/1e6).toFixed(2)+'M':abs>=1e3?(abs/1e3).toFixed(1)+'K':abs.toFixed(0);
+  return (n<0?'-$':'$')+s;
+}
+function mc(v) { return v>=0?'c-green':'c-red'; }
+function mm(v) { return v>=20?'c-green':v>=5?'c-orange':'c-red'; }
+
+function monthPills(ms) {
+  if (!ms?.length) return '';
+  const closed = ms.filter(m=>m.status==='closed').length;
+  const open   = ms.filter(m=>m.status==='open').length;
+  const total_uncat = ms.reduce((s,m)=>s+(m.uncategorized>0?m.uncategorized:0),0);
+  const sumColor = open>0||total_uncat>0 ? 'c-orange' : 'c-green';
+  const sumText  = open>0
+    ? `<span class="${sumColor}" style="font-size:11px">${open} open · ${total_uncat} uncat</span>`
+    : `<span class="c-green" style="font-size:11px">All ${closed} closed ✓</span>`;
+  const pills = ms.map(m => {
+    if (m.status==='closed') return `<span class="mpill mpill-closed" title="${m.name} — closed">✓ ${m.name}</span>`;
+    if (m.status==='current') {
+      const uc = m.uncategorized>0?` (${m.uncategorized})`:'';
+      return `<span class="mpill mpill-current" title="${m.name} in progress">→ ${m.name}${uc}</span>`;
+    }
+    const uc = m.uncategorized>0?` ${m.uncategorized}`:' ✓';
+    return `<span class="mpill mpill-open" title="${m.name} open">! ${m.name}${uc}</span>`;
+  }).join('');
+  return `<div class="month-strip">
+    <div class="strip-hd"><span class="strip-lbl">Book Status</span>${sumText}</div>
+    <div class="month-pills">${pills}</div>
+  </div>`;
 }
 
-function pctColor(v) {
-  if (v === null || v === undefined) return 'text-slate-400';
-  if (v >= 20) return 'metric-up';
-  if (v >= 5)  return 'metric-warn';
-  return 'metric-down';
-}
-
-function makeCompanyCard(c) {
-  if (c.error) {
-    return `<div class="card p-5 border-red-900">
-      <div class="font-semibold text-white mb-1">${c.name}</div>
-      <div class="text-red-400 text-sm">⚠ ${c.error}</div>
+function makeCard(c, i) {
+  const colors = QB.COLORS;
+  const col = colors[i%4];
+  if (c.error) return `
+    <div class="co-card" style="border-color:var(--red-d)">
+      <div class="co-name">${c.name}</div>
+      <div style="color:var(--red);font-size:13px;margin-top:8px">⚠ ${c.error}</div>
     </div>`;
-  }
-  const marginClass = pctColor(c.margin_pct);
-  const incomeClass = c.net_income >= 0 ? 'metric-up' : 'metric-down';
-  const cashClass   = c.cash >= 0 ? 'text-slate-200' : 'metric-down';
-
-  return `<div class="card p-5">
-    <div class="flex items-start justify-between mb-4">
+  return `
+  <div class="co-card" style="border-top:2px solid ${col}22">
+    <div class="co-card-hd">
       <div>
-        <div class="font-semibold text-white text-base leading-tight">${c.name}</div>
-        <div class="text-slate-500 text-xs mt-0.5">${c.period}</div>
+        <div class="co-name">${c.name}</div>
+        <div class="co-period">${c.period}</div>
       </div>
-      <span class="text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-400 font-medium">LIVE</span>
+      <div class="live-badge"><span class="live-dot"></span>LIVE</div>
     </div>
-    <div class="grid grid-cols-2 gap-3">
-      <div>
-        <div class="text-slate-500 text-xs mb-1">Revenue</div>
-        <div class="text-white font-bold text-lg">${fmt(c.revenue)}</div>
+    <div class="co-metrics">
+      <div class="metric-box">
+        <div class="metric-lbl">Revenue</div>
+        <div class="metric-val">${fmt(c.revenue)}</div>
       </div>
-      <div>
-        <div class="text-slate-500 text-xs mb-1">Net Income</div>
-        <div class="font-bold text-lg ${incomeClass}">${fmt(c.net_income)}</div>
+      <div class="metric-box">
+        <div class="metric-lbl">Net Income</div>
+        <div class="metric-val ${mc(c.net_income)}">${fmt(c.net_income)}</div>
       </div>
-      <div>
-        <div class="text-slate-500 text-xs mb-1">Net Margin</div>
-        <div class="font-bold text-lg ${marginClass}">${c.margin_pct}%</div>
+      <div class="metric-box">
+        <div class="metric-lbl">Net Margin</div>
+        <div class="metric-val ${mm(c.margin_pct)}">${c.margin_pct}%</div>
       </div>
-      <div>
-        <div class="text-slate-500 text-xs mb-1">Cash</div>
-        <div class="font-bold text-lg ${cashClass}">${fmt(c.cash)}</div>
+      <div class="metric-box">
+        <div class="metric-lbl">Cash</div>
+        <div class="metric-val">${fmt(c.cash)}</div>
       </div>
     </div>
-    <a href="/?company=${encodeURIComponent(c.name)}"
-       class="mt-4 flex items-center justify-center gap-2 w-full text-sm bg-slate-700 hover:bg-slate-600 text-slate-200 py-2 rounded-lg transition">
-      💬 Ask CFO AI
+    ${monthPills(c.month_status)}
+    <a href="/?company=${encodeURIComponent(c.name)}" class="co-chat-link">
+      💬 Ask CFO AI about ${c.name.split(' ')[0]}
     </a>
   </div>`;
 }
 
-function renderDeadlines(deadlines, overdue) {
-  const dl = document.getElementById('deadlines');
-  const od = document.getElementById('overdueSection');
-
-  if (!deadlines.length) {
-    dl.innerHTML = '<p class="text-slate-500 text-sm">No deadlines in the next 60 days.</p>';
-  } else {
-    dl.innerHTML = deadlines.map(d => {
-      const daysLeft = Math.ceil((new Date(d.due_date) - new Date()) / 86400000);
-      const urgency  = daysLeft <= 7 ? 'text-red-400' : daysLeft <= 21 ? 'text-yellow-400' : 'text-slate-300';
-      return `<div class="flex items-center justify-between py-2 border-b border-slate-700 last:border-0">
-        <div>
-          <span class="text-xs font-mono bg-slate-700 text-slate-300 px-2 py-0.5 rounded mr-2">${d.form}</span>
-          <span class="text-sm text-slate-300">${d.description}</span>
-        </div>
-        <div class="text-right shrink-0 ml-3">
-          <div class="text-xs ${urgency} font-semibold">${d.due_date}</div>
-          <div class="text-xs text-slate-500">${daysLeft}d</div>
-        </div>
-      </div>`;
-    }).join('');
-  }
-
-  if (overdue.length) {
-    od.innerHTML = `<div class="bg-red-950 border border-red-800 rounded-lg p-4">
-      <div class="text-red-400 font-semibold text-sm mb-2">⚠ ${overdue.length} Overdue Filings</div>
-      ${overdue.slice(0,3).map(d => `
-        <div class="flex justify-between text-sm py-1">
-          <span class="text-red-300"><span class="font-mono text-xs">${d.form}</span> — ${d.description}</span>
-          <span class="text-red-400 text-xs font-semibold">${d.due_date}</span>
-        </div>`).join('')}
-      ${overdue.length > 3 ? `<div class="text-red-500 text-xs mt-1">+${overdue.length-3} more overdue</div>` : ''}
-    </div>`;
-  }
-}
-
-function renderTotals(companies) {
-  const valid = companies.filter(c => !c.error);
-  const totalRev   = valid.reduce((s, c) => s + (c.revenue || 0), 0);
-  const totalInc   = valid.reduce((s, c) => s + (c.net_income || 0), 0);
-  const totalCash  = valid.reduce((s, c) => s + (c.cash || 0), 0);
-  const avgMargin  = valid.length ? (valid.reduce((s,c) => s + (c.margin_pct||0), 0) / valid.length).toFixed(1) : 0;
-
-  const rows = [
-    ['Total Revenue',    fmt(totalRev),   'text-white'],
-    ['Total Net Income', fmt(totalInc),   totalInc >= 0 ? 'metric-up' : 'metric-down'],
-    ['Total Cash',       fmt(totalCash),  'text-white'],
-    ['Avg Net Margin',   avgMargin+'%',   pctColor(parseFloat(avgMargin))],
-    ['Companies',        valid.length + ' connected', 'text-slate-300'],
+function renderTotals(cos) {
+  const valid = cos.filter(c=>!c.error);
+  const rv  = valid.reduce((s,c)=>s+(c.revenue||0),0);
+  const ni  = valid.reduce((s,c)=>s+(c.net_income||0),0);
+  const ca  = valid.reduce((s,c)=>s+(c.cash||0),0);
+  const am  = valid.length ? (valid.reduce((s,c)=>s+(c.margin_pct||0),0)/valid.length).toFixed(1):0;
+  const rows=[
+    ['Total Revenue',    fmt(rv),  ''],
+    ['Total Net Income', fmt(ni),  mc(ni)],
+    ['Total Cash',       fmt(ca),  ''],
+    ['Avg Net Margin',   am+'%',   mm(parseFloat(am))],
+    ['Companies',        valid.length+' connected','c-dim'],
   ];
-
-  document.getElementById('totals').innerHTML = rows.map(([label, val, cls]) => `
-    <div class="flex justify-between items-center">
-      <span class="text-slate-500 text-sm">${label}</span>
-      <span class="font-semibold ${cls}">${val}</span>
+  document.getElementById('totals').innerHTML = rows.map(([l,v,cls])=>`
+    <div class="total-row">
+      <span class="total-lbl">${l}</span>
+      <span class="total-val ${cls}">${v}</span>
     </div>`).join('');
 }
 
-async function loadDashboard() {
-  document.getElementById('loading').classList.remove('hidden');
-  document.getElementById('content').classList.add('hidden');
+function renderDeadlines(dl, od) {
+  const el = document.getElementById('deadlines');
+  if (!dl.length) { el.innerHTML='<p style="font-size:13px;color:var(--t3)">No deadlines in 60 days.</p>'; }
+  else el.innerHTML = dl.map(d=>{
+    const days = Math.ceil((new Date(d.due_date)-new Date())/86400000);
+    const dc   = days<=7?'c-red':days<=21?'c-orange':'c-dim';
+    return `<div class="dl-row">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="dl-form">${d.form}</span>
+        <span class="dl-desc">${d.description}</span>
+      </div>
+      <div style="text-align:right">
+        <div class="dl-date ${dc}">${d.due_date}</div>
+        <div style="font-size:11px;color:var(--t3)">${days}d</div>
+      </div>
+    </div>`;
+  }).join('');
 
+  const oe = document.getElementById('overdue');
+  if (od.length) oe.innerHTML=`
+    <div class="overdue-block">
+      <div class="overdue-title">⚠ ${od.length} Overdue Filing${od.length>1?'s':''}</div>
+      ${od.slice(0,3).map(d=>`<div class="overdue-row">
+        <span style="color:var(--red);font-size:13px"><span style="font-family:monospace;font-size:11px">${d.form}</span> — ${d.description}</span>
+        <span style="color:var(--red);font-size:12px;font-weight:600">${d.due_date}</span>
+      </div>`).join('')}
+    </div>`;
+}
+
+async function load() {
+  document.getElementById('loading').style.display='flex';
+  document.getElementById('content').style.display='none';
   try {
-    const res  = await fetch('/api/dashboard');
-    const data = await res.json();
-
-    document.getElementById('asOf').textContent = `as of ${data.as_of}`;
-    document.getElementById('period').textContent = data.companies[0]?.period || '';
-
-    // Company cards
-    document.getElementById('companyGrid').innerHTML =
-      data.companies.map(makeCompanyCard).join('') ||
-      '<p class="text-slate-500 col-span-3">No companies connected.</p>';
-
-    renderTotals(data.companies);
-    renderDeadlines(data.deadlines, data.overdue);
-
-    document.getElementById('loading').classList.add('hidden');
-    document.getElementById('content').classList.remove('hidden');
+    const d = await fetch('/api/dashboard').then(r=>r.json());
+    document.getElementById('as-of').textContent = `Live data · as of ${d.as_of}`;
+    document.getElementById('co-grid').innerHTML = d.companies.map((c,i)=>makeCard(c,i)).join('');
+    renderTotals(d.companies);
+    renderDeadlines(d.deadlines, d.overdue);
+    document.getElementById('loading').style.display='none';
+    document.getElementById('content').style.display='block';
   } catch(e) {
-    document.getElementById('loading').innerHTML =
-      `<div class="text-red-400">Error loading dashboard: ${e.message}</div>`;
+    document.getElementById('loading').innerHTML=`<div style="color:var(--red)">⚠ ${e.message}</div>`;
   }
 }
 
-// Auto-select company from URL param when navigating to chat
-window.addEventListener('load', () => {
-  loadDashboard();
-});
+QB.init({ active:'dashboard' });
+load();
 </script>
 </body>
 </html>

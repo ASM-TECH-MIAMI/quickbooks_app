@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Executive Report</title>
+  <script src="/static/sidebar.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <style>
+    .page { padding:32px 28px; max-width:1400px; margin:0 auto; }
+
+    /* ── Header ──────────────────────────────────────────────────────────── */
+    .page-hd { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; }
+    .page-title { font-size:24px; font-weight:700; color:var(--t1); }
+    .page-sub   { font-size:13px; color:var(--t3); margin-top:3px; }
+    .hd-actions { display:flex; gap:8px; }
+    .hd-btn {
+      display:flex; align-items:center; gap:7px;
+      background:var(--s2); border:1px solid var(--sep); border-radius:10px;
+      color:var(--t2); font-family:var(--font); font-size:13px; font-weight:500;
+      padding:8px 15px; cursor:pointer; text-decoration:none;
+      transition:background .13s, color .13s;
+    }
+    .hd-btn:hover { background:var(--s3); color:var(--t1); }
+    .hd-btn.primary { background:var(--blue-d); border-color:var(--blue-b); color:var(--blue); }
+
+    /* ── Loading ─────────────────────────────────────────────────────────── */
+    .loading { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:80px 0; color:var(--t3); }
+    .spinner { animation:spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* ── KPI hero ────────────────────────────────────────────────────────── */
+    .kpi-grid { display:grid; gap:14px; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); margin-bottom:24px; }
+    .kpi-card { background:var(--s2); border:1px solid var(--sep); border-radius:16px; padding:20px 20px 18px; }
+    .kpi-card.accent-blue   { border-color:var(--blue-b);   background:rgba(10,132,255,.06); }
+    .kpi-card.accent-purple { border-color:var(--purple-d); background:rgba(191,90,242,.06); }
+    .kpi-lbl { font-size:11px; color:var(--t3); font-weight:600; letter-spacing:.03em; margin-bottom:8px; }
+    .kpi-val { font-size:26px; font-weight:700; color:var(--t1); line-height:1.1; }
+    .kpi-sub { font-size:12px; color:var(--t3); margin-top:5px; }
+
+    /* ── Chart cards ─────────────────────────────────────────────────────── */
+    .charts-row { display:grid; gap:16px; grid-template-columns:1fr 340px; margin-bottom:24px; }
+    @media(max-width:1000px){ .charts-row { grid-template-columns:1fr; } }
+    .chart-card { background:var(--s2); border:1px solid var(--sep); border-radius:18px; padding:22px; }
+    .chart-card canvas { height:240px !important; }
+
+    /* ── Company cards ───────────────────────────────────────────────────── */
+    .co-grid { display:grid; gap:14px; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); margin-bottom:24px; }
+    .co-card {
+      background:var(--s2); border:1px solid var(--sep); border-radius:18px; padding:20px;
+      transition:border-color .2s;
+    }
+    .co-hd { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+    .co-name  { font-size:14px; font-weight:600; color:var(--t1); }
+    .co-dot   { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .co-metrics { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .mbox-lbl { font-size:10px; color:var(--t3); font-weight:500; margin-bottom:3px; }
+    .mbox-val { font-size:16px; font-weight:700; }
+    .forecast-strip {
+      margin-top:14px; padding:12px 14px; border-radius:10px;
+      font-size:12px;
+    }
+    .month-pills { display:flex; flex-wrap:wrap; gap:4px; margin-top:12px; padding-top:12px; border-top:1px solid var(--sep); }
+    .mpill { font-size:10px; font-weight:600; padding:2px 7px; border-radius:5px; }
+    .mpill-closed  { background:var(--green-d);  color:var(--green);  }
+    .mpill-open    { background:var(--orange-d); color:var(--orange); }
+    .mpill-current { background:var(--blue-d);   color:var(--blue); box-shadow:0 0 0 1px var(--blue-b); }
+
+    /* ── Accounting health ───────────────────────────────────────────────── */
+    .acct-row { display:grid; gap:16px; grid-template-columns:1fr 320px; margin-bottom:24px; }
+    @media(max-width:900px){ .acct-row { grid-template-columns:1fr; } }
+    .acct-card { background:var(--s2); border:1px solid var(--sep); border-radius:18px; padding:22px; }
+    .acct-banner { border-radius:12px; padding:14px 16px; margin-bottom:18px; display:flex; gap:12px; align-items:flex-start; }
+    .acct-banner-icon { font-size:20px; flex-shrink:0; }
+    .acct-banner-msg  { font-size:14px; font-weight:600; color:var(--t1); }
+    .acct-banner-sub  { font-size:12px; color:var(--t2); margin-top:3px; }
+    .acct-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .acct-table th { font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--t3); padding:0 8px 10px; text-align:center; }
+    .acct-table th:first-child { text-align:left; }
+    .acct-table td { padding:10px 8px; border-bottom:1px solid rgba(84,84,88,.25); vertical-align:middle; }
+    .acct-table td:first-child { text-align:left; }
+    .acct-table td { text-align:center; }
+    .acct-table tr:last-child td { border-bottom:none; }
+    .health-bar { height:5px; border-radius:3px; background:var(--s3); margin-top:4px; }
+    .health-fill { height:5px; border-radius:3px; transition:width .6s; }
+
+    /* ── Monthly table ───────────────────────────────────────────────────── */
+    .monthly-card { background:var(--s2); border:1px solid var(--sep); border-radius:18px; padding:22px; overflow-x:auto; }
+    .monthly-tbl { width:100%; border-collapse:collapse; font-size:13px; min-width:580px; }
+    .monthly-tbl th { font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--t3); padding:0 12px 10px; text-align:right; }
+    .monthly-tbl th:first-child { text-align:left; }
+    .monthly-tbl td { padding:9px 12px; border-bottom:1px solid rgba(84,84,88,.2); }
+    .monthly-tbl td:not(:first-child) { text-align:right; }
+    .monthly-tbl tr:last-child td { border-bottom:none; }
+    .monthly-tbl tfoot td { border-top:1px solid var(--sep); font-weight:700; color:var(--t1); padding-top:12px; }
+    .proj-row { opacity:.45; font-style:italic; }
+    .proj-tag { font-size:9px; color:var(--blue); background:var(--blue-d); padding:1px 5px; border-radius:4px; margin-left:4px; font-style:normal; font-weight:600; }
+
+    /* IRS deadlines card */
+    .dl-card { background:var(--s2); border:1px solid var(--sep); border-radius:18px; padding:22px; }
+    .dl-row { display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid rgba(84,84,88,.2); }
+    .dl-row:last-child { border-bottom:none; }
+    .dl-form { font-size:10px; font-family:'SF Mono','Fira Mono',monospace; background:var(--s3); color:var(--t2); padding:2px 6px; border-radius:4px; }
+    .dl-desc { font-size:12px; color:var(--t1); margin-left:6px; }
+    .dl-date { font-size:11px; font-weight:600; }
+  </style>
+</head>
+<body>
+
+<div class="page">
+  <div class="page-hd">
+    <div>
+      <div class="page-title">Executive Report</div>
+      <div class="page-sub" id="rpt-date">CFO → CEO · Loading…</div>
+    </div>
+    <div class="hd-actions">
+      <button class="hd-btn" onclick="load()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        Refresh
+      </button>
+    </div>
+  </div>
+
+  <div class="loading" id="loading">
+    <svg class="spinner" width="28" height="28" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="10" stroke="var(--s4)" stroke-width="3"/>
+      <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--blue)" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+    <span style="font-size:14px">Fetching live data from QuickBooks…</span>
+    <span style="font-size:12px;color:var(--t3)">Monthly breakdown + forecasts</span>
+  </div>
+
+  <div id="content" style="display:none;">
+    <!-- KPIs -->
+    <div class="kpi-grid" id="kpi-grid"></div>
+
+    <!-- Charts -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="sec-label" style="margin-bottom:16px;">Monthly Revenue vs Net Income</div>
+        <div style="display:flex;gap:16px;margin-bottom:14px;font-size:12px;color:var(--t3);">
+          <span><span style="display:inline-block;width:10px;height:3px;background:#0A84FF;border-radius:2px;vertical-align:middle;margin-right:5px;"></span>Revenue</span>
+          <span><span style="display:inline-block;width:10px;height:3px;background:#30D158;border-radius:2px;vertical-align:middle;margin-right:5px;"></span>Net Income</span>
+          <span style="opacity:.5"><span style="display:inline-block;width:14px;height:0;border-top:2px dashed var(--t3);vertical-align:middle;margin-right:5px;"></span>Forecast</span>
+        </div>
+        <canvas id="trendChart"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="sec-label" style="margin-bottom:16px;">Company Comparison YTD</div>
+        <canvas id="compareChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Company cards -->
+    <div class="sec-label">Company Deep Dive</div>
+    <div class="co-grid" id="co-grid"></div>
+
+    <!-- Accounting health + deadlines -->
+    <div class="acct-row">
+      <div class="acct-card">
+        <div class="sec-label">Accounting Health — How Current Are the Books?</div>
+        <div class="acct-banner" id="acct-banner"></div>
+        <table class="acct-table">
+          <thead>
+            <tr>
+              <th>Company</th><th>Closed</th><th>Open</th>
+              <th>Days Behind</th><th>Uncategorized</th><th>Score</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="acct-tbody"></tbody>
+        </table>
+        <div style="margin-top:14px;font-size:11px;color:var(--t3);line-height:1.6;">
+          Score: 60 pts for timely month-close + 40 pts for zero uncategorized transactions.<br>
+          Books expected closed within 15 days of month-end.
+        </div>
+      </div>
+      <div class="dl-card">
+        <div class="sec-label">IRS Deadlines — Next 90 Days</div>
+        <div id="dl-list"></div>
+        <div id="dl-overdue"></div>
+      </div>
+    </div>
+
+    <!-- Monthly table -->
+    <div class="monthly-card">
+      <div class="sec-label" style="margin-bottom:16px;">Month-by-Month — All Companies Combined</div>
+      <table class="monthly-tbl">
+        <thead><tr>
+          <th>Month</th><th>Revenue</th><th>Gross Profit</th>
+          <th>Net Income</th><th>Net Margin</th><th>vs Prior Month</th>
+        </tr></thead>
+        <tbody id="mo-body"></tbody>
+        <tfoot id="mo-foot"></tfoot>
+      </table>
+    </div>
+  </div>
+</div><!-- /page -->
+
+<script>
+Chart.defaults.color         = 'rgba(235,235,245,0.4)';
+Chart.defaults.borderColor   = 'rgba(84,84,88,0.35)';
+Chart.defaults.font.family   = '-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif';
+Chart.defaults.font.size     = 11;
+
+function fmt(n,d=0) {
+  if (n==null) return '—';
+  const abs=Math.abs(n);
+  const s=abs>=1e6?(abs/1e6).toFixed(2)+'M':abs>=1e3?(abs/1e3).toFixed(1)+'K':abs.toFixed(d);
+  return (n<0?'-$':'$')+s;
+}
+function mc(v){ return v>=0?'c-green':'c-red'; }
+function mm(v){ return v>=20?'c-green':v>=5?'c-orange':'c-red'; }
+
+function renderKPIs(p, me) {
+  document.getElementById('rpt-date').textContent =
+    `CFO → CEO · Jan 1 – ${me.as_of} (${me.months_elapsed.toFixed(1)} months elapsed)`;
+  document.getElementById('kpi-grid').innerHTML = `
+    <div class="kpi-card">
+      <div class="kpi-lbl">Total Revenue YTD</div>
+      <div class="kpi-val">${fmt(p.total_revenue_ytd)}</div>
+      <div class="kpi-sub">${fmt(Math.round(p.total_revenue_ytd/me.months_elapsed))}/mo average</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-lbl">Net Income YTD</div>
+      <div class="kpi-val ${mc(p.total_net_income_ytd)}">${fmt(p.total_net_income_ytd)}</div>
+      <div class="kpi-sub">${p.avg_margin}% avg net margin</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-lbl">Total Cash</div>
+      <div class="kpi-val">${fmt(p.total_cash)}</div>
+      <div class="kpi-sub">across ${p.companies_count} companies</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-lbl">Avg Net Margin</div>
+      <div class="kpi-val ${mm(p.avg_margin)}">${p.avg_margin}%</div>
+      <div class="kpi-sub">${p.companies_count} active companies</div>
+    </div>
+    <div class="kpi-card accent-blue">
+      <div class="kpi-lbl" style="color:var(--blue)">📈 Revenue Forecast EOY</div>
+      <div class="kpi-val" style="color:var(--blue)">${fmt(p.forecast_revenue_eoy)}</div>
+      <div class="kpi-sub">+${fmt(p.forecast_revenue_eoy-p.total_revenue_ytd)} remaining</div>
+    </div>
+    <div class="kpi-card accent-purple">
+      <div class="kpi-lbl" style="color:var(--purple)">📈 Net Income Forecast EOY</div>
+      <div class="kpi-val" style="color:var(--purple)">${fmt(p.forecast_net_income_eoy)}</div>
+      <div class="kpi-sub">${p.forecast_margin_eoy}% projected margin</div>
+    </div>`;
+}
+
+let tChart, cChart;
+function renderCharts(actual, projected) {
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const am={}, pm={};
+  actual.forEach(m=>am[m.month]=m); projected.forEach(m=>pm[m.month]=m);
+  const revA = MONTHS.map(m=>am[m]?.revenue??null);
+  const niA  = MONTHS.map(m=>am[m]?.net_income??null);
+  const revP = MONTHS.map(m=>pm[m]?.revenue??null);
+  const niP  = MONTHS.map(m=>pm[m]?.net_income??null);
+  // bridge last actual into projected
+  const li = revA.reduceRight((a,v,i)=>a===-1&&v!==null?i:a,-1);
+  if(li>=0&&li+1<12){ revP[li]=revA[li]; niP[li]=niA[li]; }
+
+  if(tChart) tChart.destroy();
+  tChart = new Chart(document.getElementById('trendChart').getContext('2d'),{
+    type:'line',
+    data:{ labels:MONTHS, datasets:[
+      {label:'Revenue',      data:revA, borderColor:'#0A84FF', backgroundColor:'rgba(10,132,255,.06)', borderWidth:2.5, pointRadius:4, pointBackgroundColor:'#0A84FF', tension:.35, fill:true},
+      {label:'Net Income',   data:niA,  borderColor:'#30D158', backgroundColor:'rgba(48,209,88,.06)',  borderWidth:2.5, pointRadius:4, pointBackgroundColor:'#30D158', tension:.35, fill:true},
+      {label:'Rev Forecast', data:revP, borderColor:'#0A84FF', borderDash:[5,4], borderWidth:1.5, pointRadius:3, tension:.35},
+      {label:'NI Forecast',  data:niP,  borderColor:'#30D158', borderDash:[5,4], borderWidth:1.5, pointRadius:3, tension:.35},
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmt(c.parsed.y)}`}}},
+      scales:{
+        x:{grid:{color:'rgba(84,84,88,.2)'}, ticks:{color:'rgba(235,235,245,.35)'}},
+        y:{grid:{color:'rgba(84,84,88,.2)'}, ticks:{color:'rgba(235,235,245,.35)', callback:v=>fmt(v)}},
+      },
+    },
+  });
+}
+
+function renderCompare(companies) {
+  const valid = companies.filter(c=>!c.error);
+  const labels = valid.map(c=>c.name.replace(/ (LLC|Media Group|Tech Media Group)$/,'').trim().split(' ').slice(0,2).join(' '));
+  if(cChart) cChart.destroy();
+  cChart = new Chart(document.getElementById('compareChart').getContext('2d'),{
+    type:'bar', data:{
+      labels,
+      datasets:[
+        {label:'Revenue YTD',    data:valid.map(c=>c.ytd.revenue),    backgroundColor:valid.map((_,i)=>QB.COLORS[i%4]+'26'), borderColor:valid.map((_,i)=>QB.COLORS[i%4]), borderWidth:1.5, borderRadius:5},
+        {label:'Net Income YTD', data:valid.map(c=>c.ytd.net_income), backgroundColor:'rgba(48,209,88,.18)', borderColor:'#30D158', borderWidth:1.5, borderRadius:5},
+      ],
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false, indexAxis:'y',
+      plugins:{legend:{labels:{color:'rgba(235,235,245,.5)',boxWidth:10,boxHeight:10,borderRadius:3},position:'bottom'},
+               tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmt(c.parsed.x)}`}}},
+      scales:{
+        x:{grid:{color:'rgba(84,84,88,.2)'}, ticks:{color:'rgba(235,235,245,.35)', callback:v=>fmt(v)}},
+        y:{grid:{display:false}, ticks:{color:'rgba(235,235,245,.5)'}},
+      },
+    },
+  });
+}
+
+function renderCos(companies) {
+  document.getElementById('co-grid').innerHTML = companies.map((c,i)=>{
+    if(c.error) return `<div class="co-card" style="border-color:var(--red-d)"><div class="co-name">${c.name}</div><div style="color:var(--red);font-size:13px;margin-top:8px">⚠ ${c.error}</div></div>`;
+    const col=QB.COLORS[i%4]; const ytd=c.ytd; const fc=c.forecast;
+    const ms = (c.month_status||[]).map(m=>{
+      if(m.status==='closed') return `<span class="mpill mpill-closed">✓${m.name}</span>`;
+      if(m.status==='current') return `<span class="mpill mpill-current">→${m.name}</span>`;
+      return `<span class="mpill mpill-open">!${m.name}${m.uncategorized>0?` ${m.uncategorized}`:''}</span>`;
+    }).join('');
+    return `<div class="co-card" style="border-top:2px solid ${col}33">
+      <div class="co-hd">
+        <div class="co-name">${c.name}</div>
+        <span class="co-dot" style="background:${col}"></span>
+      </div>
+      <div class="co-metrics">
+        <div><div class="mbox-lbl">Revenue</div><div class="mbox-val">${fmt(ytd.revenue)}</div></div>
+        <div><div class="mbox-lbl">Gross Profit</div><div class="mbox-val">${fmt(ytd.gross_profit)}</div></div>
+        <div><div class="mbox-lbl">Net Income</div><div class="mbox-val ${mc(ytd.net_income)}">${fmt(ytd.net_income)}</div></div>
+        <div><div class="mbox-lbl">Net Margin</div><div class="mbox-val ${mm(ytd.margin_pct)}">${ytd.margin_pct}%</div></div>
+        <div><div class="mbox-lbl">Cash</div><div class="mbox-val">${fmt(ytd.cash)}</div></div>
+        <div><div class="mbox-lbl">Gross Margin</div><div class="mbox-val">${ytd.revenue?(ytd.gross_profit/ytd.revenue*100).toFixed(1)+'%':'—'}</div></div>
+      </div>
+      <div class="forecast-strip" style="background:${col}11;border:1px solid ${col}22">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:6px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;">📈 End-of-Year Forecast</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
+          <div><span style="color:var(--t3)">Revenue </span><strong style="color:var(--blue)">${fmt(fc.revenue_eoy)}</strong></div>
+          <div><span style="color:var(--t3)">Net Inc </span><strong class="${mc(fc.net_income_eoy)}">${fmt(fc.net_income_eoy)}</strong></div>
+        </div>
+      </div>
+      <div class="month-pills">${ms}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderAccounting(companies, summary) {
+  const s = summary;
+  let bg, icon, msg;
+  if(s.avg_health_score>=80){ bg='rgba(48,209,88,.08);border:1px solid rgba(48,209,88,.2)'; icon='✅'; msg='Books are current. Accounting team is on track.'; }
+  else if(s.avg_health_score>=55){ bg='rgba(255,159,10,.08);border:1px solid rgba(255,159,10,.2)'; icon='⚠️'; msg=`${s.total_months_open} month(s) not yet closed. Accounting is slightly behind.`; }
+  else { bg='rgba(255,69,58,.08);border:1px solid rgba(255,69,58,.25)'; icon='🔴'; msg=`Accounting is behind by up to ${s.max_days_behind} days. ${s.total_months_open} months need attention.`; }
+
+  document.getElementById('acct-banner').style.cssText=`background:${bg};border-radius:12px;padding:14px 16px;margin-bottom:18px;display:flex;gap:12px;align-items:flex-start;`;
+  document.getElementById('acct-banner').innerHTML=`
+    <span style="font-size:20px">${icon}</span>
+    <div>
+      <div style="font-size:14px;font-weight:600;color:var(--t1)">${msg}</div>
+      <div style="font-size:12px;color:var(--t2);margin-top:3px">
+        Avg health: <strong>${s.avg_health_score}/100</strong> · Uncategorized: <strong>${s.total_uncat}</strong> · Max days behind: <strong>${s.max_days_behind}d</strong>
+      </div>
+    </div>`;
+
+  const STATUS = {
+    on_track:       ['b-green','✓ On Track'],
+    slightly_behind:['b-orange','⚠ Slight'],
+    behind:         ['b-red',  '! Behind'],
+    critical:       ['b-red',  '🔴 Critical'],
+  };
+  document.getElementById('acct-tbody').innerHTML = companies.filter(c=>!c.error).map(c=>{
+    const a=c.accounting; const pt=a.months_closed+a.months_open;
+    const hc=a.health_score>=80?'#30D158':a.health_score>=50?'#FF9F0A':'#FF453A';
+    const [cls,lbl]=STATUS[a.status]||['b-gray','—'];
+    return `<tr>
+      <td style="font-size:13px;font-weight:500;color:var(--t1)">${c.name.replace(/ LLC$/,'')}</td>
+      <td><span style="color:var(--green);font-weight:600">${a.months_closed}</span><span style="color:var(--t3)">/${pt}</span></td>
+      <td>${a.months_open>0?`<span style="color:var(--red);font-weight:600">${a.months_open}</span>`:'<span style="color:var(--green)">0</span>'}</td>
+      <td>${a.days_behind>0?`<span style="color:var(--red);font-weight:600">${a.days_behind}d</span>`:'<span style="color:var(--green)">0d</span>'}</td>
+      <td>${a.total_uncat>0?`<span style="color:var(--orange);font-weight:600">${a.total_uncat}</span>`:'<span style="color:var(--green)">0</span>'}</td>
+      <td style="min-width:80px">
+        <div style="font-size:12px;color:${hc};font-weight:600">${a.health_score}/100</div>
+        <div class="health-bar"><div class="health-fill" style="width:${a.health_score}%;background:${hc}"></div></div>
+      </td>
+      <td><span class="badge ${cls}">${lbl}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderDeadlines(dl, od) {
+  const el=document.getElementById('dl-list');
+  el.innerHTML = dl.slice(0,9).map(d=>{
+    const days=Math.ceil((new Date(d.due_date)-new Date())/86400000);
+    const dc=days<=7?'c-red':days<=30?'c-orange':'c-dim';
+    return `<div class="dl-row">
+      <div><span class="dl-form">${d.form}</span><span class="dl-desc">${d.description}</span></div>
+      <div style="text-align:right;flex-shrink:0;margin-left:8px">
+        <div class="dl-date ${dc}">${d.due_date}</div>
+        <div style="font-size:10px;color:var(--t3)">${days}d</div>
+      </div>
+    </div>`;
+  }).join('');
+  const oe=document.getElementById('dl-overdue');
+  if(od.length) oe.innerHTML=`<div style="margin-top:12px;background:var(--red-d);border:1px solid rgba(255,69,58,.2);border-radius:10px;padding:12px 14px;">
+    <div style="font-size:12px;font-weight:700;color:var(--red);margin-bottom:8px">⚠ ${od.length} Overdue</div>
+    ${od.slice(0,3).map(d=>`<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;">
+      <span style="color:var(--red)">${d.form} — ${d.description}</span>
+      <span style="color:var(--red);font-weight:600;margin-left:8px">${d.due_date}</span>
+    </div>`).join('')}
+  </div>`;
+}
+
+function renderMonthly(actual, projected) {
+  let prev=null;
+  const rows=[];
+  actual.forEach(m=>{
+    const mar=m.revenue?(m.net_income/m.revenue*100).toFixed(1):null;
+    const mom=prev!=null&&prev!==0?((m.revenue-prev)/prev*100):null;
+    const momc=mom===null?'c-dim':mom>=0?'c-green':'c-red';
+    rows.push(`<tr>
+      <td style="font-weight:500;color:var(--t1)">${m.month}</td>
+      <td style="color:var(--t1)">${fmt(m.revenue)}</td>
+      <td style="color:var(--t2)">${fmt(m.gross_profit)}</td>
+      <td class="${mc(m.net_income)}">${fmt(m.net_income)}</td>
+      <td class="${mar?mm(parseFloat(mar)):'c-dim'}">${mar?mar+'%':'—'}</td>
+      <td class="${momc}">${mom!==null?(mom>=0?'+':'')+mom.toFixed(1)+'%':'—'}</td>
+    </tr>`);
+    prev=m.revenue;
+  });
+  projected.forEach(m=>{
+    const mom=prev!=null&&prev!==0?((m.revenue-prev)/prev*100):null;
+    const momc=mom===null?'c-dim':mom>=0?'c-green':'c-red';
+    rows.push(`<tr class="proj-row">
+      <td style="color:var(--t2)">${m.month}<span class="proj-tag">proj</span></td>
+      <td style="color:var(--t2)">${fmt(m.revenue)}</td>
+      <td style="color:var(--t3)">—</td>
+      <td style="color:var(--t2)">${fmt(m.net_income)}</td>
+      <td style="color:var(--t3)">—</td>
+      <td class="${momc}">${mom!==null?(mom>=0?'+':'')+mom.toFixed(1)+'%':'—'}</td>
+    </tr>`);
+    prev=m.revenue;
+  });
+  document.getElementById('mo-body').innerHTML=rows.join('');
+
+  const tr=actual.reduce((s,m)=>s+m.revenue,0);
+  const ti=actual.reduce((s,m)=>s+m.net_income,0);
+  const tg=actual.reduce((s,m)=>s+m.gross_profit,0);
+  const tm=tr?(ti/tr*100).toFixed(1):null;
+  document.getElementById('mo-foot').innerHTML=`<tr>
+    <td>YTD Total</td><td>${fmt(tr)}</td><td>${fmt(tg)}</td>
+    <td class="${mc(ti)}">${fmt(ti)}</td>
+    <td class="${tm?mm(parseFloat(tm)):'c-dim'}">${tm?tm+'%':'—'}</td>
+    <td style="color:var(--t3)">—</td>
+  </tr>`;
+}
+
+async function load() {
+  document.getElementById('loading').style.display='flex';
+  document.getElementById('content').style.display='none';
+  try {
+    const d = await fetch('/api/executive').then(r=>r.json());
+    renderKPIs(d.portfolio, d);
+    renderCharts(d.monthly_actual, d.monthly_projected);
+    renderCompare(d.companies);
+    renderCos(d.companies);
+    renderAccounting(d.companies, d.accounting_summary);
+    renderDeadlines(d.deadlines, d.overdue);
+    renderMonthly(d.monthly_actual, d.monthly_projected);
+    document.getElementById('loading').style.display='none';
+    document.getElementById('content').style.display='block';
+  } catch(e) {
+    document.getElementById('loading').innerHTML=`<div style="color:var(--red)">⚠ ${e.message}</div>`;
+  }
+}
+
+QB.init({ active:'executive' });
+load();
+</script>
+</body>
+</html>
